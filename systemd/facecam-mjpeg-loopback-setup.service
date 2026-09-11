@@ -1,0 +1,13 @@
+[Unit]
+Description=Create Facecam MJPEG loopback device
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%E/facecam-mjpeg-loopback
+ExecStart=%E/facecam-mjpeg-loopback/scripts/setup-loopback.sh --config %E/facecam-mjpeg-loopback/facecam-loopback.env
+
+[Install]
+WantedBy=multi-user.target
+
