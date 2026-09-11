@@ -21,11 +21,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+read_config_value() {
+  local key="$1"
+  local value="$2"
+  value="$(trim "$value")"
+  value="${value%%#*}"
+  value="$(trim "$value")"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  case "$key" in
+    LOOPBACK_VIDEO_NR) LOOPBACK_VIDEO_NR="$value" ;;
+    LOOPBACK_DEVICE) LOOPBACK_DEVICE="$value" ;;
+    LOOPBACK_LABEL) LOOPBACK_LABEL="$value" ;;
+    LOOPBACK_EXCLUSIVE_CAPS) LOOPBACK_EXCLUSIVE_CAPS="$value" ;;
+    WIDTH) WIDTH="$value" ;;
+    HEIGHT) HEIGHT="$value" ;;
+    FPS) FPS="$value" ;;
+  esac
+}
+
 if [[ -f "$CONFIG_FILE" ]]; then
-  # shellcheck disable=SC1090
-  set -a
-  source "$CONFIG_FILE"
-  set +a
+  while IFS= read -r line; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" == export[[:space:]]* ]]; then
+      line="$(trim "${line#export}")"
+    fi
+    [[ "$line" == *=* ]] || continue
+    key="$(trim "${line%%=*}")"
+    value="${line#*=}"
+    read_config_value "$key" "$value"
+  done < "$CONFIG_FILE"
 fi
 
 LOOPBACK_VIDEO_NR="${LOOPBACK_VIDEO_NR:-6}"

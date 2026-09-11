@@ -27,6 +27,8 @@ class Config:
     width: int
     height: int
     fps: int
+    power_line_frequency: str
+    zoom_absolute: str
     placeholder_fps: int
     placeholder_quality: int
     idle_timeout_seconds: float
@@ -91,6 +93,8 @@ def load_config(path: Path) -> Config:
         width=positive_int("WIDTH", getenv(values, "WIDTH", "1280")),
         height=positive_int("HEIGHT", getenv(values, "HEIGHT", "720")),
         fps=positive_int("FPS", getenv(values, "FPS", "30")),
+        power_line_frequency=getenv(values, "FACECAM_POWER_LINE_FREQUENCY", "1"),
+        zoom_absolute=getenv(values, "FACECAM_ZOOM_ABSOLUTE", "4"),
         placeholder_fps=positive_int("PLACEHOLDER_FPS", getenv(values, "PLACEHOLDER_FPS", "1")),
         placeholder_quality=positive_int(
             "MJPEG_PLACEHOLDER_QUALITY", getenv(values, "MJPEG_PLACEHOLDER_QUALITY", "31")
@@ -200,7 +204,7 @@ def placeholder_command(config: Config) -> list[str]:
         "-hide_banner",
         "-nostdin",
         "-loglevel",
-        "warning",
+        "error",
         "-re",
         "-f",
         "lavfi",
@@ -246,6 +250,23 @@ def camera_command(config: Config, facecam_device: str) -> list[str]:
     ]
 
 
+def apply_facecam_controls(config: Config, facecam_device: str) -> None:
+    controls = []
+    if config.power_line_frequency:
+        controls.append(f"power_line_frequency={config.power_line_frequency}")
+    if config.zoom_absolute:
+        controls.append(f"zoom_absolute={config.zoom_absolute}")
+
+    for control in controls:
+        command = ["v4l2-ctl", "-d", facecam_device, f"--set-ctrl={control}"]
+        result = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            LOG.info("set Facecam control %s", control)
+        else:
+            message = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+            LOG.warning("could not set Facecam control %s: %s", control, message)
+
+
 def ensure_loopback_exists(config: Config) -> None:
     if not os.path.exists(config.loopback_device):
         raise FileNotFoundError(
@@ -284,6 +305,7 @@ def relay(config: Config) -> int:
                     producer.start("placeholder", placeholder_command(config))
                 return
             LOG.info("using Facecam device %s", facecam)
+            apply_facecam_controls(config, facecam)
             producer.start("camera", camera_command(config, facecam))
             return
         raise ValueError(f"unknown mode {mode!r}")

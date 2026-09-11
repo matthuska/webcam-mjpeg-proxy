@@ -104,6 +104,10 @@ section "Facecam"
 if [[ -n "$FACECAM_DEVICE" ]]; then
   echo "Configured camera: $FACECAM_DEVICE"
   v4l2-ctl -d "$FACECAM_DEVICE" --info || true
+  echo
+  echo "Configured controls:"
+  v4l2-ctl -d "$FACECAM_DEVICE" --get-ctrl=power_line_frequency || true
+  v4l2-ctl -d "$FACECAM_DEVICE" --get-ctrl=zoom_absolute || true
 else
   echo "FACECAM_DEVICE is not set."
 fi

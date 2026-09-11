@@ -76,6 +76,18 @@ journalctl -u facecam-mjpeg-loopback-setup.service
 journalctl --user -u facecam-mjpeg-loopback-relay.service -f
 ```
 
+Both services read the same config file:
+
+```text
+~/.config/facecam-mjpeg-loopback/facecam-loopback.env
+```
+
+The root setup service reads that file only for plain, allowlisted loopback
+settings. It does not execute the config as shell code.
+
+Older installs may have `/etc/facecam-mjpeg-loopback/facecam-loopback.env`.
+Rerunning `./scripts/install-systemd.sh` removes that stale root copy.
+
 ## Configuration
 
 The default config targets:
@@ -85,11 +97,17 @@ The default config targets:
 - Format: MJPEG
 - Resolution: `1280x720`
 - Frame rate: `30`
+- Power-line frequency: `50 Hz`
+- Zoom: `4`
 - Placeholder frame rate: `1`
 - Idle timeout: `5` seconds
 
 Set `FACECAM_DEVICE` in `facecam-loopback.env` if auto-detection picks the
 wrong camera. Prefer a stable path from `/dev/v4l/by-id/`.
+
+`FACECAM_POWER_LINE_FREQUENCY=1` sets 50 Hz anti-flicker, which is the right
+default for Germany. `FACECAM_ZOOM_ABSOLUTE=4` applies the default Facecam zoom.
+Leave either value empty to skip setting that control.
 
 Set `LOOPBACK_VIDEO_NR` and `LOOPBACK_DEVICE` to a low unused video number. If
 WebEx does not show a high-numbered device such as `/dev/video42`, try
@@ -122,3 +140,5 @@ The important part is `-c:v copy`: `ffmpeg` does not decode MJPEG or convert to
 raw video. It copies MJPEG packets from the Facecam into the loopback device,
 and WebEx consumes the MJPEG stream from there.
 
+Before starting the real camera producer, the relay applies the configured
+Facecam controls with `v4l2-ctl`, currently power-line frequency and zoom.
