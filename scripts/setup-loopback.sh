@@ -35,7 +35,14 @@ LOOPBACK_EXCLUSIVE_CAPS="${LOOPBACK_EXCLUSIVE_CAPS:-1}"
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
 FPS="${FPS:-30}"
+OUTPUT_MODE="${OUTPUT_MODE:-raw}"
 OUTPUT_PIXEL_FORMAT_GST="${OUTPUT_PIXEL_FORMAT_GST:-YUY2}"
+
+if [[ "$OUTPUT_MODE" == "mjpeg" ]]; then
+  OUTPUT_CAPS_DESCRIPTION="MJPEG ${WIDTH}x${HEIGHT}@${FPS}"
+else
+  OUTPUT_CAPS_DESCRIPTION="${OUTPUT_PIXEL_FORMAT_GST} ${WIDTH}x${HEIGHT}@${FPS}"
+fi
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "setup-loopback.sh must run as root because it loads a kernel module." >&2
@@ -71,12 +78,16 @@ if [[ ! -e "$LOOPBACK_DEVICE" ]]; then
   exit 1
 fi
 
-if [[ "$LOOPBACK_EXCLUSIVE_CAPS" == "1" || "$LOOPBACK_EXCLUSIVE_CAPS" == "true" ]]; then
+if [[ "$OUTPUT_MODE" == "mjpeg" ]]; then
+  echo "Skipping v4l2loopback-ctl set-caps because MJPEG caps require a real compressed producer."
+  echo "The relay will negotiate ${OUTPUT_CAPS_DESCRIPTION} when it starts."
+elif [[ "$LOOPBACK_EXCLUSIVE_CAPS" == "1" || "$LOOPBACK_EXCLUSIVE_CAPS" == "true" ]]; then
   echo "Skipping v4l2loopback-ctl set-caps because exclusive_caps is enabled."
-  echo "The relay will negotiate ${OUTPUT_PIXEL_FORMAT_GST} ${WIDTH}x${HEIGHT}@${FPS} when it starts."
+  echo "The relay will negotiate ${OUTPUT_CAPS_DESCRIPTION} when it starts."
 elif command -v v4l2loopback-ctl >/dev/null 2>&1; then
   v4l2loopback-ctl set-caps any "$LOOPBACK_DEVICE" >/dev/null 2>&1 || true
-  if v4l2loopback-ctl set-caps "video/x-raw, format=${OUTPUT_PIXEL_FORMAT_GST}, width=${WIDTH}, height=${HEIGHT}" "$LOOPBACK_DEVICE"; then
+  caps="video/x-raw, format=${OUTPUT_PIXEL_FORMAT_GST}, width=${WIDTH}, height=${HEIGHT}"
+  if v4l2loopback-ctl set-caps "$caps" "$LOOPBACK_DEVICE"; then
     v4l2loopback-ctl set-fps "$FPS" "$LOOPBACK_DEVICE" || true
   else
     echo "Warning: could not pre-lock loopback caps; relay will negotiate them with ffmpeg." >&2

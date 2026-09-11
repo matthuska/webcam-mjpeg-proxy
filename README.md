@@ -88,6 +88,7 @@ The default config targets:
 - Loopback device: `/dev/video6`
 - Camera label: `Facecam MJPEG Proxy`
 - Input format: MJPEG
+- Output mode: `raw`
 - Resolution: `1280x720`
 - Frame rate: `30`
 - Loopback raw output format: `YUY2` / ffmpeg `yuyv422`
@@ -153,3 +154,48 @@ Avoid `FFMPEG_INPUT_EXTRA="-c:v mjpeg_qsv"` unless you have tested it locally.
 Some Intel/ffmpeg stacks advertise the QSV MJPEG decoder but fail at runtime
 with repeated `Error during QSV decoding` messages. If that happens, remove the
 setting and restart the relay.
+
+## Experimental MJPEG Passthrough
+
+The known-good default decodes the Facecam MJPEG stream and writes raw YUYV to
+the loopback device. To avoid that decode/conversion work, try MJPEG passthrough:
+
+```sh
+OUTPUT_MODE=mjpeg
+```
+
+The MJPEG placeholder is encoded locally while idle. To reduce idle CPU further,
+you can lower it to 1 fps and use lower JPEG quality:
+
+```sh
+PLACEHOLDER_FPS=1
+MJPEG_PLACEHOLDER_QUALITY=31
+```
+
+Then close WebEx, stop the relay, recreate the loopback, and restart the relay:
+
+```sh
+sudo ./scripts/setup-loopback.sh --config ./facecam-loopback.env --replace
+./scripts/relay.py --config ./facecam-loopback.env
+```
+
+In passthrough mode the active camera producer uses ffmpeg packet copy:
+
+```sh
+ffmpeg ... -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 \
+  -i /dev/v4l/by-id/...Facecam... -c:v copy -f v4l2 /dev/video6
+```
+
+Verify the loopback advertises MJPEG:
+
+```sh
+v4l2-ctl -d /dev/video6 --list-formats-ext
+```
+
+Expected output includes `MJPG` at `1280x720`. If WebEx does not list or use the
+proxy in this mode, set `OUTPUT_MODE=raw` and rerun the same recreate/restart
+commands to return to the working path.
+
+`v4l2loopback-ctl set-caps` is intentionally skipped in MJPEG mode. Its helper
+pipeline cannot synthesize compressed MJPEG caps reliably; the relay producer
+must establish them by writing actual MJPEG frames.

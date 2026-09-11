@@ -29,16 +29,23 @@ LOOPBACK_LABEL="${LOOPBACK_LABEL:-Facecam MJPEG Proxy}"
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
 OUTPUT_PIXEL_FORMAT_GST="${OUTPUT_PIXEL_FORMAT_GST:-YUY2}"
+OUTPUT_MODE="${OUTPUT_MODE:-raw}"
 FACECAM_DEVICE="${FACECAM_DEVICE:-}"
 
-case "$OUTPUT_PIXEL_FORMAT_GST" in
-  YUY2)
-    OUTPUT_PIXEL_FORMAT_V4L2=YUYV
-    ;;
-  *)
-    OUTPUT_PIXEL_FORMAT_V4L2="$OUTPUT_PIXEL_FORMAT_GST"
-    ;;
-esac
+if [[ "$OUTPUT_MODE" == "mjpeg" ]]; then
+  OUTPUT_PIXEL_FORMAT_V4L2=MJPG
+  OUTPUT_PIXEL_FORMAT_PATTERN="MJPG|JPEG"
+else
+  case "$OUTPUT_PIXEL_FORMAT_GST" in
+    YUY2)
+      OUTPUT_PIXEL_FORMAT_V4L2=YUYV
+      ;;
+    *)
+      OUTPUT_PIXEL_FORMAT_V4L2="$OUTPUT_PIXEL_FORMAT_GST"
+      ;;
+  esac
+  OUTPUT_PIXEL_FORMAT_PATTERN="$OUTPUT_PIXEL_FORMAT_V4L2"
+fi
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -77,10 +84,35 @@ else
 fi
 
 section "Relay Processes"
-pgrep -af 'relay.py|ffmpeg .*v4l2' || echo "No relay/ffmpeg process found."
-ffmpeg_pid="$(pgrep -n -f 'ffmpeg .*v4l2' || true)"
-if [[ -n "$ffmpeg_pid" ]]; then
-  ps -o pid,pcpu,pmem,comm,args -p "$ffmpeg_pid"
+pgrep -af 'relay.py|ffmpeg .*v4l2' || echo "No relay producer process found."
+producer_pid="$(pgrep -n -f 'ffmpeg .*v4l2' || true)"
+if [[ -n "$producer_pid" ]]; then
+  ps -o pid,pcpu,pmem,comm,args -p "$producer_pid"
+fi
+
+section "Loopback Consumers"
+if [[ -e "$LOOPBACK_DEVICE" ]]; then
+  device_realpath="$(readlink -f "$LOOPBACK_DEVICE")"
+  found_consumer=0
+  relay_pid="$(pgrep -n -f 'relay.py' || true)"
+  for proc_dir in /proc/[0-9]*; do
+    pid="${proc_dir##*/}"
+    [[ "$pid" == "$relay_pid" || "$pid" == "$producer_pid" ]] && continue
+    fd_dir="$proc_dir/fd"
+    [[ -d "$fd_dir" ]] || continue
+    for fd in "$fd_dir"/*; do
+      [[ -e "$fd" ]] || continue
+      if [[ "$(readlink -f "$fd" 2>/dev/null || true)" == "$device_realpath" ]]; then
+        name="$(cat "$proc_dir/comm" 2>/dev/null || echo unknown)"
+        echo "$pid/$name"
+        found_consumer=1
+        break
+      fi
+    done
+  done
+  if [[ "$found_consumer" -eq 0 ]]; then
+    echo "No external process currently has $LOOPBACK_DEVICE open."
+  fi
 fi
 
 section "Facecam"
@@ -105,7 +137,7 @@ if [[ -e "$LOOPBACK_DEVICE" ]]; then
   if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -q "$expected_size"; then
     echo "$LOOPBACK_DEVICE is not advertising $expected_size. Stop the relay, rerun setup with --replace, then restart the relay."
   fi
-  if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -q "$OUTPUT_PIXEL_FORMAT_V4L2"; then
+  if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -Eq "$OUTPUT_PIXEL_FORMAT_PATTERN"; then
     echo "$LOOPBACK_DEVICE is not advertising $OUTPUT_PIXEL_FORMAT_V4L2. Current format may be unsuitable for WebEx."
   fi
 fi
