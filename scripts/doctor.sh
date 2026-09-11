@@ -28,24 +28,9 @@ LOOPBACK_DEVICE="${LOOPBACK_DEVICE:-/dev/video${LOOPBACK_VIDEO_NR}}"
 LOOPBACK_LABEL="${LOOPBACK_LABEL:-Facecam MJPEG Proxy}"
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
-OUTPUT_PIXEL_FORMAT_GST="${OUTPUT_PIXEL_FORMAT_GST:-YUY2}"
-OUTPUT_MODE="${OUTPUT_MODE:-raw}"
 FACECAM_DEVICE="${FACECAM_DEVICE:-}"
-
-if [[ "$OUTPUT_MODE" == "mjpeg" ]]; then
-  OUTPUT_PIXEL_FORMAT_V4L2=MJPG
-  OUTPUT_PIXEL_FORMAT_PATTERN="MJPG|JPEG"
-else
-  case "$OUTPUT_PIXEL_FORMAT_GST" in
-    YUY2)
-      OUTPUT_PIXEL_FORMAT_V4L2=YUYV
-      ;;
-    *)
-      OUTPUT_PIXEL_FORMAT_V4L2="$OUTPUT_PIXEL_FORMAT_GST"
-      ;;
-  esac
-  OUTPUT_PIXEL_FORMAT_PATTERN="$OUTPUT_PIXEL_FORMAT_V4L2"
-fi
+EXPECTED_FORMAT=MJPG
+EXPECTED_FORMAT_PATTERN="MJPG|JPEG"
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -137,8 +122,8 @@ if [[ -e "$LOOPBACK_DEVICE" ]]; then
   if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -q "$expected_size"; then
     echo "$LOOPBACK_DEVICE is not advertising $expected_size. Stop the relay, rerun setup with --replace, then restart the relay."
   fi
-  if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -Eq "$OUTPUT_PIXEL_FORMAT_PATTERN"; then
-    echo "$LOOPBACK_DEVICE is not advertising $OUTPUT_PIXEL_FORMAT_V4L2. Current format may be unsuitable for WebEx."
+  if ! v4l2-ctl -d "$LOOPBACK_DEVICE" --list-formats-ext 2>/dev/null | grep -Eq "$EXPECTED_FORMAT_PATTERN"; then
+    echo "$LOOPBACK_DEVICE is not advertising $EXPECTED_FORMAT. Current format may be unsuitable for WebEx."
   fi
 fi
 echo "Restart WebEx after recreating the loopback device; camera lists are often cached at app startup."

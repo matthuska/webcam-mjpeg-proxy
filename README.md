@@ -1,26 +1,25 @@
 # Facecam MJPEG Loopback Proxy
 
 This repository creates a WebEx-friendly virtual camera for an Elgato Facecam.
-The physical camera is opened as MJPEG at 720p30, then decoded into a
-`v4l2loopback` device that video-call software can read.
+It exposes only the Facecam's MJPEG stream through `v4l2loopback`, avoiding the
+raw USB video mode that can saturate a busy USB-C link.
 
-The virtual camera stays visible using a low-FPS placeholder stream. The real
-Facecam stream starts only when an external application opens the loopback
-device, and stops again after a short idle timeout.
+The virtual camera stays visible using a low-FPS MJPEG placeholder stream. The
+real Facecam stream starts only when an external application opens the proxy,
+and stops again after a short idle timeout.
 
 ## Requirements
 
 - Linux with V4L2
 - `ffmpeg`
 - `v4l2-ctl`
-- `v4l2loopback-ctl`
 - `v4l2loopback` kernel module
 - `systemd`, for the optional services
 
 On Ubuntu, the usual packages are:
 
 ```sh
-sudo apt install ffmpeg v4l-utils v4l2loopback-utils
+sudo apt install ffmpeg v4l-utils
 ```
 
 If `modinfo v4l2loopback` fails, install `v4l2loopback-dkms` too. Some Ubuntu
@@ -28,22 +27,18 @@ kernels ship the module already; others need DKMS to build it locally.
 
 ## Quick Start
 
-Copy the sample config and adjust it if needed:
+Copy the sample config and adjust `FACECAM_DEVICE` if auto-detection picks the
+wrong camera:
 
 ```sh
 cp facecam-loopback.env.example facecam-loopback.env
-```
-
-Probe the camera:
-
-```sh
 ./scripts/probe-camera.sh
 ```
 
 Create the loopback device:
 
 ```sh
-sudo ./scripts/setup-loopback.sh
+sudo ./scripts/setup-loopback.sh --config ./facecam-loopback.env --replace
 ```
 
 Run the relay in the foreground:
@@ -52,7 +47,7 @@ Run the relay in the foreground:
 ./scripts/relay.py --config ./facecam-loopback.env
 ```
 
-Then select `Facecam MJPEG Proxy` in WebEx or another video-call app.
+Then start WebEx and select `Facecam MJPEG Proxy`.
 
 ## systemd Install
 
@@ -87,11 +82,10 @@ The default config targets:
 
 - Loopback device: `/dev/video6`
 - Camera label: `Facecam MJPEG Proxy`
-- Input format: MJPEG
-- Output mode: `raw`
+- Format: MJPEG
 - Resolution: `1280x720`
 - Frame rate: `30`
-- Loopback raw output format: `YUY2` / ffmpeg `yuyv422`
+- Placeholder frame rate: `1`
 - Idle timeout: `5` seconds
 
 Set `FACECAM_DEVICE` in `facecam-loopback.env` if auto-detection picks the
@@ -108,94 +102,23 @@ Run diagnostics with:
 ./scripts/doctor.sh --config ./facecam-loopback.env
 ```
 
-If WebEx still does not list the proxy, close WebEx, stop the relay, recreate
-the loopback device with a low number, restart the relay, then start WebEx:
-
-```sh
-sudo ./scripts/setup-loopback.sh --config ./facecam-loopback.env --replace
-./scripts/relay.py --config ./facecam-loopback.env
-```
-
-The loopback should advertise `YUYV`/`YUY2` at `1280x720`. If it shows
-`640x480 BGR4`, the old format is still locked; stop the relay before running
-setup with `--replace`.
-
-When `LOOPBACK_EXCLUSIVE_CAPS=1`, setup intentionally skips
-`v4l2loopback-ctl set-caps`; the relay's placeholder producer establishes the
-actual `1280x720` format. Start the relay before checking formats or launching
-WebEx.
+The loopback should advertise `MJPG` at `1280x720`. If it shows an old format,
+close WebEx, stop the relay, recreate the device, restart the relay, then start
+WebEx again.
 
 ## How It Works
 
-`v4l2loopback` creates a virtual V4L2 camera. The relay continuously feeds it
-with a lightweight placeholder so WebEx can discover it. When another process
-opens the proxy device, the relay switches to:
-
-```sh
-ffmpeg -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 -i FACE_CAM ...
-```
-
-That forces the USB input path to use MJPEG, avoiding the high USB bandwidth
-cost of raw camera capture.
-
-The active relay process should look roughly like this while a call is using
-the proxy:
-
-```sh
-ffmpeg ... -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 \
-  -i /dev/v4l/by-id/...Facecam... \
-  -vf format=yuyv422 -s 1280x720 -r 30 -pix_fmt yuyv422 -f v4l2 /dev/video6
-```
-
-`ffmpeg` does the MJPEG decode and raw V4L2 output, so it is the process that
-will use CPU during a call. The Python relay should stay near idle.
-
-Avoid `FFMPEG_INPUT_EXTRA="-c:v mjpeg_qsv"` unless you have tested it locally.
-Some Intel/ffmpeg stacks advertise the QSV MJPEG decoder but fail at runtime
-with repeated `Error during QSV decoding` messages. If that happens, remove the
-setting and restart the relay.
-
-## Experimental MJPEG Passthrough
-
-The known-good default decodes the Facecam MJPEG stream and writes raw YUYV to
-the loopback device. To avoid that decode/conversion work, try MJPEG passthrough:
-
-```sh
-OUTPUT_MODE=mjpeg
-```
-
-The MJPEG placeholder is encoded locally while idle. To reduce idle CPU further,
-you can lower it to 1 fps and use lower JPEG quality:
-
-```sh
-PLACEHOLDER_FPS=1
-MJPEG_PLACEHOLDER_QUALITY=31
-```
-
-Then close WebEx, stop the relay, recreate the loopback, and restart the relay:
-
-```sh
-sudo ./scripts/setup-loopback.sh --config ./facecam-loopback.env --replace
-./scripts/relay.py --config ./facecam-loopback.env
-```
-
-In passthrough mode the active camera producer uses ffmpeg packet copy:
+`v4l2loopback` creates a virtual V4L2 camera. The relay feeds it with a
+low-FPS black MJPEG placeholder so WebEx can discover it. When another process
+opens the proxy device, the relay switches to MJPEG packet copy from the
+Facecam:
 
 ```sh
 ffmpeg ... -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 \
   -i /dev/v4l/by-id/...Facecam... -c:v copy -f v4l2 /dev/video6
 ```
 
-Verify the loopback advertises MJPEG:
+The important part is `-c:v copy`: `ffmpeg` does not decode MJPEG or convert to
+raw video. It copies MJPEG packets from the Facecam into the loopback device,
+and WebEx consumes the MJPEG stream from there.
 
-```sh
-v4l2-ctl -d /dev/video6 --list-formats-ext
-```
-
-Expected output includes `MJPG` at `1280x720`. If WebEx does not list or use the
-proxy in this mode, set `OUTPUT_MODE=raw` and rerun the same recreate/restart
-commands to return to the working path.
-
-`v4l2loopback-ctl set-caps` is intentionally skipped in MJPEG mode. Its helper
-pipeline cannot synthesize compressed MJPEG caps reliably; the relay producer
-must establish them by writing actual MJPEG frames.

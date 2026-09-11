@@ -27,15 +27,10 @@ class Config:
     width: int
     height: int
     fps: int
-    input_format: str
-    output_mode: str
-    output_pixel_format_ffmpeg: str
     placeholder_fps: int
-    mjpeg_placeholder_quality: int
+    placeholder_quality: int
     idle_timeout_seconds: float
     poll_interval_seconds: float
-    ffmpeg_input_extra: tuple[str, ...]
-    ffmpeg_output_extra: tuple[str, ...]
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -56,9 +51,7 @@ def parse_env_file(path: Path) -> dict[str, str]:
         value = value.strip()
         if not key.replace("_", "").isalnum() or key[0].isdigit():
             raise ValueError(f"{path}:{line_no}: invalid key {key!r}")
-        parsed = shlex.split(value, comments=True, posix=True)
-        value = " ".join(parsed)
-        values[key] = value
+        values[key] = " ".join(shlex.split(value, comments=True, posix=True))
     return values
 
 
@@ -89,28 +82,17 @@ def nonnegative_float(name: str, value: str) -> float:
     return parsed
 
 
-def parse_output_mode(value: str) -> str:
-    parsed = value.lower()
-    if parsed not in {"raw", "mjpeg"}:
-        raise ValueError("OUTPUT_MODE must be 'raw' or 'mjpeg'")
-    return parsed
-
-
 def load_config(path: Path) -> Config:
     values = parse_env_file(path)
-    facecam_glob = getenv(values, "FACECAM_DEVICE_GLOB", "/dev/v4l/by-id/*Elgato*Facecam*")
     return Config(
         facecam_device=getenv(values, "FACECAM_DEVICE", ""),
-        facecam_device_glob=facecam_glob,
-        loopback_device=getenv(values, "LOOPBACK_DEVICE", "/dev/video42"),
+        facecam_device_glob=getenv(values, "FACECAM_DEVICE_GLOB", "/dev/v4l/by-id/*Elgato*Facecam*"),
+        loopback_device=getenv(values, "LOOPBACK_DEVICE", "/dev/video6"),
         width=positive_int("WIDTH", getenv(values, "WIDTH", "1280")),
         height=positive_int("HEIGHT", getenv(values, "HEIGHT", "720")),
         fps=positive_int("FPS", getenv(values, "FPS", "30")),
-        input_format=getenv(values, "INPUT_FORMAT", "mjpeg"),
-        output_mode=parse_output_mode(getenv(values, "OUTPUT_MODE", "raw")),
-        output_pixel_format_ffmpeg=getenv(values, "OUTPUT_PIXEL_FORMAT_FFMPEG", "yuyv422"),
-        placeholder_fps=positive_int("PLACEHOLDER_FPS", getenv(values, "PLACEHOLDER_FPS", "5")),
-        mjpeg_placeholder_quality=positive_int(
+        placeholder_fps=positive_int("PLACEHOLDER_FPS", getenv(values, "PLACEHOLDER_FPS", "1")),
+        placeholder_quality=positive_int(
             "MJPEG_PLACEHOLDER_QUALITY", getenv(values, "MJPEG_PLACEHOLDER_QUALITY", "31")
         ),
         idle_timeout_seconds=nonnegative_float(
@@ -119,8 +101,6 @@ def load_config(path: Path) -> Config:
         poll_interval_seconds=nonnegative_float(
             "POLL_INTERVAL_SECONDS", getenv(values, "POLL_INTERVAL_SECONDS", "0.5")
         ),
-        ffmpeg_input_extra=tuple(shlex.split(getenv(values, "FFMPEG_INPUT_EXTRA", ""))),
-        ffmpeg_output_extra=tuple(shlex.split(getenv(values, "FFMPEG_OUTPUT_EXTRA", ""))),
     )
 
 
@@ -213,69 +193,7 @@ class Producer:
             command_builder(mode)
 
 
-def raw_placeholder_command(config: Config) -> list[str]:
-    size = f"{config.width}x{config.height}"
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        "-re",
-        "-f",
-        "lavfi",
-        "-i",
-        f"color=c=black:s={size}:r={config.placeholder_fps}",
-        "-vf",
-        f"format={config.output_pixel_format_ffmpeg}",
-        "-s",
-        size,
-        "-r",
-        str(config.fps),
-        "-pix_fmt",
-        config.output_pixel_format_ffmpeg,
-        "-f",
-        "v4l2",
-        *config.ffmpeg_output_extra,
-        config.loopback_device,
-    ]
-
-
-def raw_camera_command(config: Config, facecam_device: str) -> list[str]:
-    size = f"{config.width}x{config.height}"
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "warning",
-        "-f",
-        "v4l2",
-        "-input_format",
-        config.input_format,
-        "-video_size",
-        size,
-        "-framerate",
-        str(config.fps),
-        *config.ffmpeg_input_extra,
-        "-i",
-        facecam_device,
-        "-vf",
-        f"format={config.output_pixel_format_ffmpeg}",
-        "-s",
-        size,
-        "-r",
-        str(config.fps),
-        "-pix_fmt",
-        config.output_pixel_format_ffmpeg,
-        "-f",
-        "v4l2",
-        *config.ffmpeg_output_extra,
-        config.loopback_device,
-    ]
-
-
-def ffmpeg_mjpeg_placeholder_command(config: Config) -> list[str]:
+def placeholder_command(config: Config) -> list[str]:
     size = f"{config.width}x{config.height}"
     return [
         "ffmpeg",
@@ -291,19 +209,18 @@ def ffmpeg_mjpeg_placeholder_command(config: Config) -> list[str]:
         "-c:v",
         "mjpeg",
         "-q:v",
-        str(config.mjpeg_placeholder_quality),
+        str(config.placeholder_quality),
         "-s",
         size,
         "-r",
         str(config.placeholder_fps),
         "-f",
         "v4l2",
-        *config.ffmpeg_output_extra,
         config.loopback_device,
     ]
 
 
-def ffmpeg_mjpeg_camera_command(config: Config, facecam_device: str) -> list[str]:
+def camera_command(config: Config, facecam_device: str) -> list[str]:
     size = f"{config.width}x{config.height}"
     return [
         "ffmpeg",
@@ -314,33 +231,19 @@ def ffmpeg_mjpeg_camera_command(config: Config, facecam_device: str) -> list[str
         "-f",
         "v4l2",
         "-input_format",
-        config.input_format,
+        "mjpeg",
         "-video_size",
         size,
         "-framerate",
         str(config.fps),
-        *config.ffmpeg_input_extra,
         "-i",
         facecam_device,
         "-c:v",
         "copy",
         "-f",
         "v4l2",
-        *config.ffmpeg_output_extra,
         config.loopback_device,
     ]
-
-
-def placeholder_command(config: Config) -> list[str]:
-    if config.output_mode == "mjpeg":
-        return ffmpeg_mjpeg_placeholder_command(config)
-    return raw_placeholder_command(config)
-
-
-def camera_command(config: Config, facecam_device: str) -> list[str]:
-    if config.output_mode == "mjpeg":
-        return ffmpeg_mjpeg_camera_command(config, facecam_device)
-    return raw_camera_command(config, facecam_device)
 
 
 def ensure_loopback_exists(config: Config) -> None:
