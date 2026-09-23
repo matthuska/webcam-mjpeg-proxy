@@ -1,16 +1,19 @@
-# Facecam MJPEG Loopback Proxy
+# MJPEG Camera Loopback Proxy
 
-This repository creates a WebEx-friendly virtual camera for an Elgato Facecam.
-It exposes only the Facecam's MJPEG stream through `v4l2loopback`, avoiding the
-raw USB video mode that can saturate a busy USB-C link.
+This repository creates a WebEx-friendly virtual camera for USB webcams that
+advertise MJPEG, such as an Elgato Facecam or Logitech Brio. It exposes only
+the selected camera's MJPEG stream through `v4l2loopback`, avoiding raw USB
+video modes that can saturate a busy USB-C link.
 
 The virtual camera stays visible using a low-FPS MJPEG placeholder stream. The
-real Facecam stream starts only when an external application opens the proxy,
-and stops again after a short idle timeout.
+real hardware camera is selected only when an external application opens the
+proxy, so you can suspend the laptop, move between workplaces, and let the
+relay choose whichever configured camera is plugged in.
 
 ## Requirements
 
 - Linux with V4L2
+- Python 3.11 or newer, for stdlib TOML parsing
 - `ffmpeg`
 - `v4l2-ctl`
 - `v4l2loopback` kernel module
@@ -27,27 +30,26 @@ kernels ship the module already; others need DKMS to build it locally.
 
 ## Quick Start
 
-Copy the sample config and adjust `FACECAM_DEVICE` if auto-detection picks the
-wrong camera:
+Copy the sample TOML config and edit camera profiles if needed:
 
 ```sh
-cp facecam-loopback.env.example facecam-loopback.env
-./scripts/probe-camera.sh
+cp mjpeg-camera-loopback.toml.example mjpeg-camera-loopback.toml
+./scripts/probe-camera.sh --config ./mjpeg-camera-loopback.toml
 ```
 
 Create the loopback device:
 
 ```sh
-sudo ./scripts/setup-loopback.sh --config ./facecam-loopback.env --replace
+sudo ./scripts/setup-loopback.sh --config ./mjpeg-camera-loopback.toml --replace
 ```
 
 Run the relay in the foreground:
 
 ```sh
-./scripts/relay.py --config ./facecam-loopback.env
+./scripts/relay.py --config ./mjpeg-camera-loopback.toml
 ```
 
-Then start WebEx and select `Facecam MJPEG Proxy`.
+Then start WebEx and select `MJPEG Camera Proxy`.
 
 ## systemd Install
 
@@ -57,67 +59,99 @@ Install the system and user units:
 ./scripts/install-systemd.sh
 ```
 
+The installer disables the old `facecam-mjpeg-loopback-*` services if they were
+installed, because the old relay would otherwise keep feeding the same loopback
+device.
+
 Enable the root setup service:
 
 ```sh
-sudo systemctl enable --now facecam-mjpeg-loopback-setup.service
+sudo systemctl enable --now mjpeg-camera-loopback-setup.service
 ```
 
 Enable the user relay:
 
 ```sh
-systemctl --user enable --now facecam-mjpeg-loopback-relay.service
+systemctl --user enable --now mjpeg-camera-loopback-relay.service
 ```
 
 Check logs:
 
 ```sh
-journalctl -u facecam-mjpeg-loopback-setup.service
-journalctl --user -u facecam-mjpeg-loopback-relay.service -f
+journalctl -u mjpeg-camera-loopback-setup.service
+journalctl --user -u mjpeg-camera-loopback-relay.service -f
 ```
 
 Both services read the same config file:
 
 ```text
-~/.config/facecam-mjpeg-loopback/facecam-loopback.env
+~/.config/mjpeg-camera-loopback/mjpeg-camera-loopback.toml
 ```
 
-The root setup service reads that file only for plain, allowlisted loopback
-settings. It does not execute the config as shell code.
-
-Older installs may have `/etc/facecam-mjpeg-loopback/facecam-loopback.env`.
-Rerunning `./scripts/install-systemd.sh` removes that stale root copy.
+The root setup service reads that file through the Python TOML parser and uses
+only the loopback settings. It does not execute the config as shell code.
 
 ## Configuration
 
 The default config targets:
 
 - Loopback device: `/dev/video6`
-- Camera label: `Facecam MJPEG Proxy`
+- Camera label: `MJPEG Camera Proxy`
 - Format: MJPEG
 - Resolution: `1280x720`
 - Frame rate: `30`
-- Power-line frequency: `50 Hz`
-- Zoom: `4`
 - Placeholder frame rate: `1`
 - Idle timeout: `5` seconds
+- Camera priority: `facecam`, then `brio`
 
-Set `FACECAM_DEVICE` in `facecam-loopback.env` if auto-detection picks the
-wrong camera. Prefer a stable path from `/dev/v4l/by-id/`.
+Example:
 
-`FACECAM_POWER_LINE_FREQUENCY=1` sets 50 Hz anti-flicker, which is the right
-default for Germany. `FACECAM_ZOOM_ABSOLUTE=4` applies the default Facecam zoom.
-Leave either value empty to skip setting that control.
+```toml
+[loopback]
+device = "/dev/video6"
+video_nr = 6
+label = "MJPEG Camera Proxy"
+exclusive_caps = true
 
-Set `LOOPBACK_VIDEO_NR` and `LOOPBACK_DEVICE` to a low unused video number. If
-WebEx does not show a high-numbered device such as `/dev/video42`, try
-`/dev/video6` when your physical cameras occupy `/dev/video0` through
-`/dev/video5`.
+[capture]
+width = 1280
+height = 720
+fps = 30
+
+[placeholder]
+fps = 1
+mjpeg_quality = 31
+
+[relay]
+idle_timeout_seconds = 5
+poll_interval_seconds = 0.5
+
+[selection]
+order = ["facecam", "brio"]
+
+[cameras.facecam]
+glob = "/dev/v4l/by-id/*Elgato*Facecam*-video-index0"
+
+[cameras.facecam.controls]
+power_line_frequency = 1
+zoom_absolute = 4
+
+[cameras.brio]
+glob = "/dev/v4l/by-id/*Logitech*BRIO*-video-index0"
+
+[cameras.brio.controls]
+power_line_frequency = 1
+zoom_absolute = 129
+```
+
+Add another `[cameras.<name>]` table for each additional webcam, then include
+the name in `selection.order`. Each camera can declare only the controls that
+make sense for that hardware. Unsupported controls are logged and skipped.
 
 Run diagnostics with:
 
 ```sh
-./scripts/doctor.sh --config ./facecam-loopback.env
+./scripts/doctor.sh --config ./mjpeg-camera-loopback.toml
 ```
 
 The loopback should advertise `MJPG` at `1280x720`. If it shows an old format,
@@ -128,17 +162,20 @@ WebEx again.
 
 `v4l2loopback` creates a virtual V4L2 camera. The relay feeds it with a
 low-FPS black MJPEG placeholder so WebEx can discover it. When another process
-opens the proxy device, the relay switches to MJPEG packet copy from the
-Facecam:
+opens the proxy device, the relay scans the configured camera profiles in
+`selection.order`, chooses the first currently connected device, applies that
+profile's controls, then starts MJPEG packet copy:
 
 ```sh
 ffmpeg ... -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 \
-  -i /dev/v4l/by-id/...Facecam... -c:v copy -f v4l2 /dev/video6
+  -i /dev/v4l/by-id/...-video-index0 -c:v copy -f v4l2 /dev/video6
 ```
 
 The important part is `-c:v copy`: `ffmpeg` does not decode MJPEG or convert to
-raw video. It copies MJPEG packets from the Facecam into the loopback device,
-and WebEx consumes the MJPEG stream from there.
+raw video. It copies MJPEG packets from the hardware camera into the loopback
+device, and WebEx consumes the MJPEG stream from there.
 
-Before starting the real camera producer, the relay applies the configured
-Facecam controls with `v4l2-ctl`, currently power-line frequency and zoom.
+When there are no consumers, the relay returns to the placeholder stream. If a
+camera disappears after suspend or unplug, `ffmpeg` exits, the relay falls back
+to the placeholder, and the next active consumer check reselects from the
+currently connected cameras.

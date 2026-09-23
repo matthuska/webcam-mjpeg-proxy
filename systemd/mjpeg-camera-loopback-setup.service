@@ -1,5 +1,5 @@
 [Unit]
-Description=Create Facecam MJPEG loopback device
+Description=Create MJPEG camera loopback device
 After=systemd-modules-load.service
 RequiresMountsFor=@USER_CONFIG_FILE@
 
@@ -11,3 +11,4 @@ ExecStart=@SYSTEM_APP_DIR@/scripts/setup-loopback.sh --config @USER_CONFIG_FILE@
 
 [Install]
 WantedBy=multi-user.target
+
