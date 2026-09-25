@@ -1,6 +1,11 @@
 # MJPEG Camera Loopback Proxy
 
-This repository creates a WebEx-friendly virtual camera for USB webcams that
+By default, Webex on Linux may choose a webcam's raw video stream instead of
+its MJPEG stream when both are available. Depending on your hardware, this can
+cause flickering or video dropouts because raw video uses much more USB
+bandwidth.
+
+This repository creates a Webex-friendly virtual camera for USB webcams that
 advertise MJPEG, such as an Elgato Facecam or Logitech Brio. It exposes only
 the selected camera's MJPEG stream through `v4l2loopback`, avoiding raw USB
 video modes that can saturate a busy USB-C link.
@@ -49,7 +54,7 @@ Run the relay in the foreground:
 ./scripts/relay.py --config ./mjpeg-camera-loopback.toml
 ```
 
-Then start WebEx and select `MJPEG Camera Proxy`.
+Then start Webex and select `MJPEG Camera Proxy`.
 
 ## systemd Install
 
@@ -155,13 +160,13 @@ Run diagnostics with:
 ```
 
 The loopback should advertise `MJPG` at `1280x720`. If it shows an old format,
-close WebEx, stop the relay, recreate the device, restart the relay, then start
-WebEx again.
+close Webex, stop the relay, recreate the device, restart the relay, then start
+Webex again.
 
 ## How It Works
 
 `v4l2loopback` creates a virtual V4L2 camera. The relay feeds it with a
-low-FPS black MJPEG placeholder so WebEx can discover it. When another process
+low-FPS black MJPEG placeholder so Webex can discover it. When another process
 opens the proxy device, the relay scans the configured camera profiles in
 `selection.order`, chooses the first currently connected device, applies that
 profile's controls, then starts MJPEG packet copy:
@@ -173,7 +178,7 @@ ffmpeg ... -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 30 \
 
 The important part is `-c:v copy`: `ffmpeg` does not decode MJPEG or convert to
 raw video. It copies MJPEG packets from the hardware camera into the loopback
-device, and WebEx consumes the MJPEG stream from there.
+device, and Webex consumes the MJPEG stream from there.
 
 When there are no consumers, the relay returns to the placeholder stream. If a
 camera disappears after suspend or unplug, `ffmpeg` exits, the relay falls back
