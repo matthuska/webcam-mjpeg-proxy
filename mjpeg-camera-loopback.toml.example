@@ -1,0 +1,35 @@
+[loopback]
+device = "/dev/video6"
+video_nr = 6
+label = "MJPEG Camera Proxy"
+exclusive_caps = true
+
+[capture]
+width = 1280
+height = 720
+fps = 30
+
+[placeholder]
+fps = 1
+mjpeg_quality = 31
+
+[relay]
+idle_timeout_seconds = 5
+poll_interval_seconds = 0.5
+
+[selection]
+order = ["facecam", "brio"]
+
+[cameras.facecam]
+glob = "/dev/v4l/by-id/*Elgato*Facecam*-video-index0"
+
+[cameras.facecam.controls]
+power_line_frequency = 1
+zoom_absolute = 4
+
+[cameras.brio]
+glob = "/dev/v4l/by-id/*Logitech*BRIO*-video-index0"
+
+[cameras.brio.controls]
+power_line_frequency = 1
+zoom_absolute = 129

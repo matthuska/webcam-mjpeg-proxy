@@ -1,0 +1,14 @@
+[Unit]
+Description=On-demand MJPEG camera relay
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/mjpeg-camera-loopback
+ExecStart=%h/.local/share/mjpeg-camera-loopback/scripts/relay.py --config %h/.config/mjpeg-camera-loopback/mjpeg-camera-loopback.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+

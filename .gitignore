@@ -1,4 +1,4 @@
 __pycache__/
 *.py[cod]
 facecam-loopback.env
-
+mjpeg-camera-loopback.toml
